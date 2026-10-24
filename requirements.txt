@@ -1,0 +1,7 @@
+# Runtime
+streamlit>=1.40
+pydantic>=2.5
+requests>=2.31
+
+# Tests (no network or Ollama needed)
+pytest>=8.0
