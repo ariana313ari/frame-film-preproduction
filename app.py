@@ -14,7 +14,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from agent import NEXT_LABEL, FrameAgent
+import ui_theme as ui
+from agent import NEXT_LABEL, FrameAgent, next_intent
 from export_utils import safe_filename
 from llm_provider import LLMConfig, create_provider, load_env_file
 from sample_project import sample_brief, sample_full, sample_with_flaws
@@ -22,39 +23,20 @@ from schemas import ArtifactStatus, BudgetLevel, Intent, Project, Severity, Stag
 
 load_env_file(Path(__file__).parent / ".env")
 
-st.set_page_config(page_title="FRAME — AI Film Pre-Production", page_icon="🎬", layout="wide")
+# Brand assets, resolved relative to this file so `streamlit run app.py` works from any directory.
+ASSETS = Path(__file__).parent / "assets"
+LOGO = ASSETS / "frame_logo.png"
+ICON = ASSETS / "frame_app_icon.png"
 
-# --------------------------------------------------------------------------- #
-# Styling (scoped to .frame-* classes plus a few Streamlit widgets)
-# --------------------------------------------------------------------------- #
-st.markdown(
-    """
-<style>
-:root { --frame-accent:#d9a441; --frame-panel:#1a1d24; --frame-line:#2a2e38; --frame-muted:#9a9a9a; }
-.block-container { padding-top: 1.6rem; max-width: 1500px; }
-h1, h2, h3 { font-family: Georgia, 'Times New Roman', serif; letter-spacing: .01em; }
-.frame-brand { font-family: Georgia, serif; font-size: 2.1rem; letter-spacing: .28em; color: var(--frame-accent); margin: 0; }
-.frame-tag { color: var(--frame-muted); font-size: .9rem; margin-top: -.2rem; }
-.frame-card { background: var(--frame-panel); border: 1px solid var(--frame-line); border-radius: 10px; padding: 1rem 1.2rem; }
-.frame-chip { display:inline-block; padding: .1rem .6rem; border-radius: 999px; font-size:.78rem; border:1px solid var(--frame-line); color:var(--frame-muted); margin-right:.3rem; }
-.frame-chip.ok { color:#7ec699; border-color:#2f5a40; } .frame-chip.bad { color:#e08a8a; border-color:#6a3434; }
-.frame-chip.sample { color:var(--frame-accent); border-color:#6b5320; }
-.frame-step { display:flex; justify-content:space-between; padding:.18rem 0; font-size:.9rem; border-bottom:1px dashed var(--frame-line); }
-.frame-hero h3 { margin-top:0; color: var(--frame-accent); }
-div[data-testid="stTabs"] button[role="tab"] { font-size: .95rem; }
-div[data-testid="stSidebar"] { border-right: 1px solid var(--frame-line); }
-@media (max-width: 900px) { .frame-brand { font-size: 1.5rem; } .block-container { padding: 1rem .6rem; } }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="FRAME — AI Film Pre-Production Assistant",
+                   page_icon=str(ICON) if ICON.is_file() else "🎬", layout="wide")
+st.markdown(ui.CSS, unsafe_allow_html=True)  # "Cinematic Studio" visual layer (colours live in .streamlit/config.toml)
 
 BUDGET_LABEL = {"LOW": "Бага", "MEDIUM": "Дунд", "HIGH": "Өндөр"}
-STAGE_TITLE = {
-    Stage.IDEA: "Идея", Stage.SCRIPT: "Сценар", Stage.SCENES: "Дүр зургийн задлал",
-    Stage.SHOTS: "Шотын жагсаалт", Stage.PLAN: "Үйлдвэрлэлийн төлөвлөгөө", Stage.VALIDATION: "Шалгалт",
+STAGE_TITLE = {  # short names: used in the workflow stepper and notices
+    Stage.IDEA: "Идея", Stage.SCRIPT: "Сценар", Stage.SCENES: "Дүр зураг",
+    Stage.SHOTS: "Шот", Stage.PLAN: "Төлөвлөгөө", Stage.VALIDATION: "Шалгалт",
 }
-STATUS_ICON = {ArtifactStatus.FRESH: "✅", ArtifactStatus.OUTDATED: "⚠️", ArtifactStatus.EMPTY: "⬜"}
 
 
 # --------------------------------------------------------------------------- #
@@ -179,14 +161,19 @@ def stale_banner(stage: Stage) -> None:
 
 
 def provenance_chip(stage: Stage) -> None:
+    """Badge that tells sample data, AI output and rule-based results apart."""
     origin = st.session_state.project.provenance.get(stage, "")
     if origin == "sample":
-        st.markdown('<span class="frame-chip sample">SAMPLE — статик жишээ, AI үр дүн биш</span>',
-                    unsafe_allow_html=True)
-    elif origin.startswith("model"):
-        st.markdown(f'<span class="frame-chip">AI · {origin.split(":", 1)[1]}</span>', unsafe_allow_html=True)
+        html = ui.badge("Sample · статик жишээ — AI үр дүн биш", "sample")
+    elif origin.startswith("deterministic+model:"):
+        html = ui.badge(f"Rules + AI review · {origin.split(':', 1)[1]}", "ai")
+    elif origin.startswith("model:"):
+        html = ui.badge(f"AI · {origin.split(':', 1)[1]}", "ai")
     elif origin.startswith("deterministic"):
-        st.markdown(f'<span class="frame-chip">{origin}</span>', unsafe_allow_html=True)
+        html = ui.badge("Rules · deterministic", "rules")
+    else:
+        return
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -195,10 +182,7 @@ def provenance_chip(stage: Stage) -> None:
 def render_sidebar(p: Project) -> None:
     ss = st.session_state
     with st.sidebar:
-        st.markdown('<p class="frame-brand">FRAME</p><p class="frame-tag">AI Film Pre-Production Agent</p>',
-                    unsafe_allow_html=True)
-        st.divider()
-        st.subheader("Төсөл")
+        st.markdown(ui.side_label("Төсөл"), unsafe_allow_html=True)
         st.text_input("Төслийн нэр", key="w_name")
         st.text_input("Жанр", key="w_genre", placeholder="жишээ: нууцлаг триллер")
         st.number_input("Хугацаа (минут)", min_value=0.5, max_value=30.0, step=0.5, key="w_duration")
@@ -212,16 +196,13 @@ def render_sidebar(p: Project) -> None:
         st.selectbox("Үр дүнгийн хэл", ["mn", "en"],
                      format_func=lambda v: "Монгол" if v == "mn" else "English", key="w_language")
 
-        st.divider()
-        st.subheader("AI загвар")
+        st.markdown(ui.side_label("AI загвар"), unsafe_allow_html=True)
         status = ss.llm_status
         cfg = ss.llm_config
-        chip = "ok" if status.available else "bad"
-        st.markdown(f'<span class="frame-chip {chip}">{"бэлэн" if status.available else "боломжгүй"}</span>'
-                    f'<span class="frame-chip">{cfg.provider} · {ss.provider.model or "—"}</span>', unsafe_allow_html=True)
+        st.markdown(ui.chip("бэлэн" if status.available else "боломжгүй", "ok" if status.available else "bad")
+                    + ui.chip(f"{cfg.provider} · {ss.provider.model or '—'}"), unsafe_allow_html=True)
         if not status.available:
-            st.warning(f"{status.message}\n\n**Demo горим:** зөвхөн дүрэмд суурилсан tool-ууд "
-                       "(шалгалт, төлөвлөгөө, экспорт) ажиллана.")
+            st.warning(status.message)
         with st.expander("Загварын тохиргоо"):
             if cfg.provider == "ollama":
                 st.text_input("Ollama URL", value=cfg.base_url, key="w_base_url")
@@ -238,18 +219,7 @@ def render_sidebar(p: Project) -> None:
                        "ашиглагдаж болно. Нууц агуулга бүү илгээгээрэй.")
         st.button("Холболтыг дахин шалгах", on_click=recheck_model)
 
-        st.divider()
-        st.subheader("Явц")
-        done = sum(1 for s in Stage if p.is_fresh(s))
-        st.progress(done / len(Stage))
-        for stage in Stage:
-            stt = p.get_status(stage)
-            suffix = " · sample" if p.provenance.get(stage) == "sample" else ""
-            st.markdown(f'<div class="frame-step"><span>{STAGE_TITLE[stage]}</span>'
-                        f'<span>{STATUS_ICON[stt]} {stt.value}{suffix}</span></div>', unsafe_allow_html=True)
-
-        st.divider()
-        st.subheader("Жишээ төсөл")
+        st.markdown(ui.side_label("Жишээ төсөл"), unsafe_allow_html=True)
         st.button("🎬 The Last Bus — зөвхөн brief", width="stretch", on_click=load_project, args=(
             sample_brief(), "«The Last Bus» brief ачааллаа. Миний AI-аар бүх алхмыг ажиллуулж үзэхийн тулд "
                             "«Санаа хөгжүүлэх» эсвэл «Сценар бичих» гэж хэлнэ үү."))
@@ -264,22 +234,70 @@ def render_sidebar(p: Project) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Workspace header: project slate, workflow stepper, content-origin notices
+# --------------------------------------------------------------------------- #
+def render_header(p: Project) -> None:
+    ss = st.session_state
+    status = ss.llm_status
+    chips = (ui.chip("AI бэлэн" if status.available else "Demo горим · AI боломжгүй",
+                     "ok" if status.available else "bad")
+             + ui.chip(f"{ss.llm_config.provider} · {ss.provider.model or '—'}"))
+    slate = [
+        ("Жанр", p.genre),
+        ("Хугацаа", f"{p.duration_minutes:g} мин"),
+        ("Байршил", f"≤ {p.max_locations}" if p.max_locations else ""),
+        ("Жүжигчин", f"≤ {p.max_actors}" if p.max_actors else ""),
+        ("Төсөв", BUDGET_LABEL[p.budget.value]),
+        ("Хэв маяг", p.visual_style),
+    ]
+    logo_col, info_col = st.columns([3, 5], vertical_alignment="center")
+    with logo_col:
+        if LOGO.is_file():  # the logo already carries the FRAME wordmark and tagline
+            st.image(str(LOGO), width=330)
+        else:
+            st.markdown('<div class="frame-wordmark">FRAME</div>', unsafe_allow_html=True)
+    with info_col:
+        st.markdown(ui.header(p.name, slate, chips), unsafe_allow_html=True)
+    st.markdown(ui.rule(), unsafe_allow_html=True)
+
+    steps = [(STAGE_TITLE[s], p.get_status(s).value, p.provenance.get(s) == "sample") for s in Stage]
+    st.markdown(ui.stepper(steps, sum(1 for s in Stage if p.is_fresh(s)), len(Stage),
+                           NEXT_LABEL[next_intent(p)]), unsafe_allow_html=True)
+
+    sample_stages = [STAGE_TITLE[s] for s in Stage if p.provenance.get(s) == "sample"]
+    if sample_stages:
+        st.markdown(ui.notice(
+            f"<b>SAMPLE контент</b> · {ui.esc(', '.join(sample_stages))} нь урьдчилан бэлтгэсэн статик жишээ бөгөөд "
+            "AI-ийн үр дүн <b>биш</b>. Өөрийн санаагаар AI-аар үүсгэхийн тулд «Санаа хөгжүүлэх» эсвэл "
+            "«Сценар үүсгэх»-ийг ажиллуулна уу.", "sample"), unsafe_allow_html=True)
+    if not status.available:
+        st.warning("**Demo горим** — AI загвар холбогдоогүй. Дүрэмд суурилсан tool-ууд (шалгалт, төлөвлөгөө, "
+                   "экспорт) ажиллана. Загвар шаардсан алхмууд тодорхой алдаа харуулна. "
+                   f"({status.message})")
+
+
+# --------------------------------------------------------------------------- #
 # Chat column
 # --------------------------------------------------------------------------- #
 def render_chat() -> None:
     ss = st.session_state
-    st.subheader("Туслах")
+    st.markdown(ui.panel_title("Туслах", "Director's assistant"), unsafe_allow_html=True)
     box = st.container(height=520, border=True)
     with box:
         if not ss.chat:
-            with st.chat_message("assistant"):
+            with st.chat_message("assistant", avatar=":material/movie:"):
                 st.markdown("Сайн байна уу! Би **FRAME** — таны киноны бэлтгэл ажлын туслах.\n\n"
                             "Киноны санаагаа бичээрэй, эсвэл зүүн талын **жишээ төсөл** сонгоно уу. "
                             "Би санаа → сценар → дүр зураг → шот → төлөвлөгөө → шалгалт → экспорт "
-                            "дарааллаар хамт ажиллана.")
+                            "дарааллаар хамт ажиллана.\n\n"
+                            "Жишээ команд: `Санаагаа хөгжүүл` · `Create the full script package` · `Шалгалт хий`")
         for msg in ss.chat:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+            avatar = ":material/person:" if msg["role"] == "user" else ":material/movie:"
+            with st.chat_message(msg["role"], avatar=avatar):
+                if msg.get("ok") is False:  # keep the full message visible, but make failures unmistakable
+                    (st.error if "❌" in msg["content"] else st.warning)(msg["content"])
+                else:
+                    st.markdown(msg["content"])
                 if msg.get("steps"):
                     with st.expander("Ажилласан tool-ууд"):
                         for s in msg["steps"]:
@@ -299,25 +317,33 @@ def render_chat() -> None:
 # --------------------------------------------------------------------------- #
 def empty_state() -> None:
     st.markdown(
-        '<div class="frame-card frame-hero"><h3>Шинэ төслөө эхлүүлье</h3>'
-        "<p>1. Зүүн талд киноны <b>санаагаа</b> бичих эсвэл <b>жишээ төсөл</b> сонгох<br>"
-        "2. Туслах сценар, дүр зураг, шот, төлөвлөгөөг алхам алхмаар үүсгэнэ<br>"
-        "3. Шалгалт хийж, <b>Markdown багц</b> татаж авна</p></div>",
+        '<div class="frame-hero"><div class="t">Шинэ төслөө эхлүүлье</div><ol>'
+        "<li>Хажуугийн самбарт <b>жишээ төсөл</b> сонгох, эсвэл чатад киноны <b>санаагаа</b> бичих</li>"
+        "<li>Туслах сценар, дүр зураг, шот, төлөвлөгөөг алхам алхмаар үүсгэнэ</li>"
+        "<li>Шалгалт хийж, <b>Markdown багц</b> татаж авна</li></ol></div>",
         unsafe_allow_html=True)
-    st.write("")
+
+
+def table(rows: list[dict], **column_config) -> None:
+    """Read-only table with the shared look (and optional per-column widths)."""
+    st.dataframe(rows, hide_index=True, width="stretch", column_config=column_config or None)
 
 
 def tab_idea(p: Project) -> None:
-    st.text_area("Киноны санаа (premise)", key="w_idea", height=110,
+    st.markdown(ui.section("Киноны санаа", "Санаагаа бичээд, батлагдсан шийдвэрүүдээ тэмдэглэнэ. "
+                                          "AI эдгээрийг өөрчлөхгүй хадгална."), unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 2])
+    c1.text_area("Киноны санаа (premise)", key="w_idea", height=140,
                  placeholder="Жишээ: Хоосон автобусны зогсоолд хүлээж буй охин ирээдүйг 10 секундээр харна…")
-    st.text_area("Батлагдсан бүтээлч шийдвэрүүд (мөр бүрт нэг) — AI эдгээрийг хадгална", key="w_decisions",
-                 height=90)
+    c2.text_area("Батлагдсан бүтээлч шийдвэрүүд (мөр бүрт нэг) — AI эдгээрийг хадгална", key="w_decisions",
+                 height=140)
     action_button("Санаа хөгжүүлэх", Intent.DEVELOP_IDEA, key="btn_idea", primary=True)
-    provenance_chip(Stage.IDEA)
 
     notes = p.idea_notes
     if notes:
-        st.markdown(f"**Дүгнэлт:** {notes.summary}")
+        st.markdown(ui.section("Хөгжүүлсэн санаа"), unsafe_allow_html=True)
+        provenance_chip(Stage.IDEA)
+        st.markdown(ui.notice(f"<b>Дүгнэлт.</b> {ui.esc(notes.summary)}"), unsafe_allow_html=True)
         cols = st.columns(2)
         with cols[0]:
             st.markdown("**Логлайны санал**")
@@ -331,22 +357,24 @@ def tab_idea(p: Project) -> None:
         if notes.suggested_decisions:
             st.markdown("**Санал болгож буй шийдвэрүүд**")
             for i, d in enumerate(notes.suggested_decisions):
-                c1, c2 = st.columns([5, 1])
-                c1.write(d)
-                c2.button("Батлах", key=f"approve_{i}", on_click=approve_decision, args=(d,),
-                          disabled=d in p.approved_decisions)
+                with st.container(border=True):
+                    c1, c2 = st.columns([5, 1], vertical_alignment="center")
+                    c1.write(d)
+                    c2.button("Батлах", key=f"approve_{i}", on_click=approve_decision, args=(d,),
+                              disabled=d in p.approved_decisions)
 
     if p.logline:
-        st.divider()
-        st.subheader("Story")
+        st.markdown(ui.section("Story", "Логлайн, синопсис, дүрүүд"), unsafe_allow_html=True)
         provenance_chip(Stage.SCRIPT)
         stale_banner(Stage.SCRIPT)
-        st.markdown(f"**Логлайн:** {p.logline}")
-        st.markdown(f"**Синопсис:** {p.synopsis}")
+        st.markdown(f'<div class="frame-logline">{ui.esc(p.logline)}</div>', unsafe_allow_html=True)
+        st.markdown(f"**Синопсис**\n\n{p.synopsis}")
         st.markdown("**Дүрүүд**")
-        st.dataframe([{"Нэр": c.name, "Үүрэг": c.role, "Тайлбар": c.description,
-                       "Continuity дэлгэрэнгүй": ", ".join(c.details)} for c in p.characters],
-                     hide_index=True, width="stretch")
+        for start in range(0, len(p.characters), 3):
+            for col, c in zip(st.columns(3), p.characters[start:start + 3]):
+                with col, st.container(border=True):
+                    st.markdown(ui.character_card(c.name, c.role, c.description, c.details),
+                                unsafe_allow_html=True)
 
 
 def instruction_input(key: str) -> dict:
@@ -365,7 +393,7 @@ def tab_script(p: Project) -> None:
         action_button("Дүр зургийг задлах", Intent.BREAKDOWN_SCENES, key="btn_scenes",
                       args=args if p.script_scenes else None)
 
-    st.markdown("##### Сценар")
+    st.markdown(ui.section("Сценар", "Дүр зураг бүрийн текст"), unsafe_allow_html=True)
     stale_banner(Stage.SCRIPT)
     if not p.script_scenes:
         st.info("Сценар хараахан үүсээгүй байна. Эхлээд санаагаа оруулаад «Сценар үүсгэх» дарна уу.")
@@ -373,9 +401,9 @@ def tab_script(p: Project) -> None:
         provenance_chip(Stage.SCRIPT)
         for s in p.script_scenes:
             with st.expander(f"Дүр зураг {s.number} — {s.heading}", expanded=s.number == 1):
-                st.text(s.text)
+                st.markdown(ui.screenplay(s.text), unsafe_allow_html=True)
 
-    st.markdown("##### Дүр зургийн задлал")
+    st.markdown(ui.section("Дүр зургийн задлал", "Байршил, цаг, дүрүүд, props, хугацаа"), unsafe_allow_html=True)
     stale_banner(Stage.SCENES)
     if not p.scenes:
         st.info("Дүр зургийн задлал хараахан хийгдээгүй байна.")
@@ -386,10 +414,14 @@ def tab_script(p: Project) -> None:
         m2.metric("Нийт хугацаа", f"{p.total_scene_seconds:g} сек", f"зорилт {p.duration_seconds:g} сек",
                   delta_color="off")
         m3.metric("Байршил", len({s.location.casefold() for s in p.scenes}))
-        st.dataframe([{
+        table([{
             "#": s.number, "Байршил": s.location, "Цаг": s.time_of_day.value,
             "Дүрүүд": ", ".join(s.characters), "Props": ", ".join(s.props), "Үйлдэл": s.action,
-            "Сек": s.estimated_duration_sec} for s in p.scenes], hide_index=True, width="stretch")
+            "Сек": s.estimated_duration_sec} for s in p.scenes],
+            **{"#": st.column_config.NumberColumn("#", width="small"),
+               "Цаг": st.column_config.TextColumn("Цаг", width="small"),
+               "Сек": st.column_config.NumberColumn("Сек", format="%g", width="small"),
+               "Үйлдэл": st.column_config.TextColumn("Үйлдэл", width="large")})
 
 
 def tab_shots(p: Project) -> None:
@@ -400,14 +432,21 @@ def tab_shots(p: Project) -> None:
     if not p.shots:
         st.info("Шотын жагсаалт хараахан үүсээгүй байна. Эхлээд дүр зургийг задлах шаардлагатай.")
         return
+    st.markdown(ui.section("Шотын жагсаалт", "Дүр зураг бүрт холбогдсон камерын шотууд"), unsafe_allow_html=True)
     provenance_chip(Stage.SHOTS)
     m1, m2 = st.columns(2)
     m1.metric("Шот", len(p.shots))
     m2.metric("Нийт хугацаа", f"{sum(s.estimated_duration_sec for s in p.shots):g} сек")
-    st.dataframe([{
-        "#": s.number, "Scene": s.scene_number, "Type": s.shot_type.value, "Angle": s.camera_angle.value,
-        "Movement": s.movement.value, "Тайлбар": s.description, "Дуу": s.audio_notes,
-        "Сек": s.estimated_duration_sec} for s in p.shots], hide_index=True, width="stretch")
+    table([{
+        "#": s.number, "Scene": s.scene_number, "Тайлбар": s.description, "Type": s.shot_type.value,
+        "Angle": s.camera_angle.value, "Movement": s.movement.value, "Дуу": s.audio_notes,
+        "Сек": s.estimated_duration_sec} for s in p.shots],
+        **{"#": st.column_config.NumberColumn("#", width="small"),
+           "Scene": st.column_config.NumberColumn("Scene", width="small"),
+           "Тайлбар": st.column_config.TextColumn("Тайлбар", width="large"),
+           "Type": st.column_config.TextColumn("Type", width="medium"),
+           "Дуу": st.column_config.TextColumn("Дуу", width="medium"),
+           "Сек": st.column_config.NumberColumn("Сек", format="%g", width="small")})
 
 
 def tab_plan(p: Project) -> None:
@@ -417,29 +456,31 @@ def tab_plan(p: Project) -> None:
         st.info("Төлөвлөгөө хараахан гараагүй байна. Шотын жагсаалт бэлэн болсны дараа ажиллана.")
         return
     plan = p.plan
+    st.markdown(ui.section("Үйлдвэрлэлийн төлөвлөгөө"), unsafe_allow_html=True)
     provenance_chip(Stage.PLAN)
     st.caption("Доорх зүйлс нь дүрэмд суурилсан ТААМАГЛАЛ. Үнэ, зардал тооцоогүй.")
     m1, m2, m3 = st.columns(3)
-    m1.metric("Зураг авалтын өдөр", plan.shoot_days)
+    m1.metric("Авалтын өдөр", plan.shoot_days)
     m2.metric("Нийт (таамаг)", f"~{plan.total_minutes} мин")
     m3.metric("Props", len(plan.props))
-    st.markdown("##### Хуваарь")
-    st.dataframe([{"Өдөр": b.day, "Дараалал": b.order, "Блок": b.label,
-                   "Дүр зураг": ", ".join(map(str, b.scene_numbers)), "Мин (таамаг)": b.estimated_minutes,
-                   "Тэмдэглэл": b.notes} for b in plan.schedule], hide_index=True, width="stretch")
+    st.markdown(ui.section("Хуваарь"), unsafe_allow_html=True)
+    table([{"Өдөр": b.day, "Дараалал": b.order, "Блок": b.label,
+            "Дүр зураг": ", ".join(map(str, b.scene_numbers)), "Мин (таамаг)": b.estimated_minutes,
+            "Тэмдэглэл": b.notes} for b in plan.schedule],
+          **{"Өдөр": st.column_config.NumberColumn("Өдөр", width="small"),
+             "Дараалал": st.column_config.NumberColumn("Дараалал", width="small")})
+    st.markdown(ui.section("Тоног төхөөрөмж"), unsafe_allow_html=True)
+    mark = {True: "✅ байгаа", False: "❓ жагсаалтад алга", None: "—"}
+    table([{"Нэр": e.name, "Шалтгаан": e.reason, "Төлөв": mark[e.available]} for e in plan.equipment],
+          **{"Шалтгаан": st.column_config.TextColumn("Шалтгаан", width="large")})
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("##### Тоног төхөөрөмж")
-        mark = {True: "✅ байгаа", False: "❓ жагсаалтад алга", None: "—"}
-        st.dataframe([{"Нэр": e.name, "Шалтгаан": e.reason, "Төлөв": mark[e.available]}
-                      for e in plan.equipment], hide_index=True, width="stretch")
+        st.markdown(ui.section("Props"), unsafe_allow_html=True)
+        table([{"Нэр": x.name, "Дүр зураг": ", ".join(map(str, x.scene_numbers))} for x in plan.props])
     with c2:
-        st.markdown("##### Props")
-        st.dataframe([{"Нэр": x.name, "Дүр зураг": ", ".join(map(str, x.scene_numbers))}
-                      for x in plan.props], hide_index=True, width="stretch")
-    st.markdown("##### Байршил")
-    st.dataframe([{"Байршил": x.name, "Дүр зураг": ", ".join(map(str, x.scene_numbers)),
-                   "Цаг": x.time_of_day} for x in plan.locations], hide_index=True, width="stretch")
+        st.markdown(ui.section("Байршил"), unsafe_allow_html=True)
+        table([{"Байршил": x.name, "Дүр зураг": ", ".join(map(str, x.scene_numbers)), "Цаг": x.time_of_day}
+               for x in plan.locations])
     st.info("**Таамаглал**\n\n" + "\n".join(f"- {a}" for a in plan.assumptions))
 
 
@@ -452,6 +493,8 @@ def tab_validation(p: Project) -> None:
     if not p.is_fresh(Stage.VALIDATION):
         st.info("Шалгалт хараахан ажиллаагүй байна. Дүр зургийн задлал (болон шот) бэлэн болсны дараа ажиллуулна уу.")
     else:
+        st.markdown(ui.section("Шалгалтын дүн", "Дүрмэн шалгалт баталгаатай; AI санал нь зөвхөн зөвлөмж"),
+                    unsafe_allow_html=True)
         provenance_chip(Stage.VALIDATION)
         counts = {sev: sum(1 for i in p.issues if i.severity == sev) for sev in Severity}
         m1, m2, m3 = st.columns(3)
@@ -460,20 +503,17 @@ def tab_validation(p: Project) -> None:
         m3.metric("Тэмдэглэл", counts[Severity.INFO])
         if not p.issues:
             st.success("Дүрмийн шалгалтаар асуудал илрээгүй.")
-        color = {Severity.ERROR: "red", Severity.WARNING: "orange", Severity.INFO: "blue"}
         for issue in sorted(p.issues, key=lambda i: list(Severity).index(i.severity)):
-            tag = "дүрмэн шалгалт" if issue.source == "deterministic" else "AI санал · баталгаагүй"
-            where = f" · дүр зураг {issue.scene_number}" if issue.scene_number else ""
-            where += f" · шот {issue.shot_number}" if issue.shot_number else ""
-            with st.container(border=True):
-                st.markdown(f":{color[issue.severity]}[**{issue.severity.value}**] `{issue.code}` "
-                            f"_{tag}{where}_")
-                st.write(issue.message)
-                if issue.suggestion:
-                    st.caption(f"Санал: {issue.suggestion}")
+            where = " · ".join(filter(None, [
+                f"дүр зураг {issue.scene_number}" if issue.scene_number else "",
+                f"шот {issue.shot_number}" if issue.shot_number else ""]))
+            source = "дүрмэн шалгалт" if issue.source == "deterministic" else "AI санал · баталгаагүй"
+            st.markdown(ui.issue_card(issue.severity.value, issue.code, issue.message, issue.suggestion,
+                                      source, where), unsafe_allow_html=True)
 
     st.divider()
-    st.markdown("##### Экспорт")
+    st.markdown(ui.section("Экспорт", "Бүх хэсэг, шалгалтын тэмдэглэлийг агуулсан Markdown багц"),
+                unsafe_allow_html=True)
     action_button("Үйлдвэрлэлийн багц бэлтгэх (Markdown)", Intent.EXPORT_PACKAGE, key="btn_export")
     export = st.session_state.export
     if export:
@@ -495,15 +535,9 @@ def main() -> None:
     p: Project = ss.project
 
     render_sidebar(p)
+    render_header(p)
 
-    st.markdown('<p class="frame-brand">FRAME</p><p class="frame-tag">Киноны бэлтгэл ажлын AI туслах · '
-                  "санаа → сценар → шот → төлөвлөгөө → экспорт</p>", unsafe_allow_html=True)
-    if not ss.llm_status.available:
-        st.warning("**Demo горим** — AI загвар холбогдоогүй. Дүрэмд суурилсан tool-ууд (шалгалт, төлөвлөгөө, "
-                   "экспорт) ажиллана. Загвар шаардсан алхмууд тодорхой алдаа харуулна. "
-                   f"({ss.llm_status.message})")
-
-    chat_col, work_col = st.columns([5, 7], gap="large")
+    chat_col, work_col = st.columns([4, 8], gap="large")
     with chat_col:
         render_chat()
     with work_col:

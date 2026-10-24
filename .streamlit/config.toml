@@ -1,10 +1,36 @@
+# FRAME "Cinematic Studio" theme: charcoal / near-black surfaces, one muted-gold accent.
+# Most of the visual system lives here (native Streamlit theming); ui_theme.py only adds
+# the few things the theme cannot express (header, stepper, badges, screenplay page).
+
 [theme]
 base = "dark"
-primaryColor = "#d9a441"
-backgroundColor = "#121317"
-secondaryBackgroundColor = "#1a1d24"
-textColor = "#e9e6df"
-font = "sans serif"
+primaryColor = "#c9a45c"
+backgroundColor = "#0d0e11"
+secondaryBackgroundColor = "#15171c"
+textColor = "#e9e5db"
+font = "sans-serif"
+headingFont = "serif"
+baseRadius = "small"
+buttonRadius = "small"
+borderColor = "#2a2d36"
+showWidgetBorder = true
+showSidebarBorder = true
+linkColor = "#d9b872"
+codeBackgroundColor = "#1b1e25"
+dataframeHeaderBackgroundColor = "#1b1e25"
+
+# Status colours (used by :red[..] style text, alerts, charts)
+redColor = "#e07a72"
+orangeColor = "#d9904f"
+yellowColor = "#c9a45c"
+greenColor = "#82b896"
+blueColor = "#7aa2d4"
+violetColor = "#a58fd0"
+grayColor = "#9fa1a8"
+
+[theme.sidebar]
+backgroundColor = "#090a0c"
+secondaryBackgroundColor = "#14161a"
 
 [browser]
 gatherUsageStats = false
