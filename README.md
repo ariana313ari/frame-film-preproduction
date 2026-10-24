@@ -40,7 +40,8 @@ The *“Demo: алдаатай жишээ”* button loads the same project with
 ```bash
 python -m pytest
 ```
-Tests need no internet and no Ollama (a scripted LLM stub exists **only** in `tests/`).
+Tests need no internet, no Ollama and no API key: a scripted LLM stub and a fake Gemini client exist **only** in `tests/`,
+and the suite ignores your real `.env` and `FRAME_*`/`GEMINI_*` variables so it can never use your key.
 
 ---
 
@@ -50,15 +51,47 @@ Copy `.env.example` to `.env` (optional). Everything also works with defaults.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FRAME_LLM_PROVIDER` | `ollama` | provider adapter name |
+| `FRAME_LLM_PROVIDER` | `ollama` | `ollama` or `gemini`. No automatic fallback between them. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `FRAME_MODEL` | `qwen2.5:3b` | model name |
 | `FRAME_TIMEOUT_SECONDS` | `300` | per-request timeout (CPU generation is slow) |
 | `FRAME_TEMPERATURE` | `0.4` | sampling temperature |
 | `FRAME_NUM_CTX` | `8192` | context window requested from Ollama |
+| `GEMINI_API_KEY` | – | Gemini only. Secret: put it in your local `.env` only. |
+| `GEMINI_MODEL` | – (`.env.example` suggests one) | Gemini only. Required; model names and free-tier access change. |
+| `GEMINI_TEMPERATURE` | unset | Gemini only, optional (see below). |
 
-The URL, model name and timeout can also be changed live in the sidebar (*Загварын тохиргоо*).
-No API keys are needed, none are hard-coded, and the UI never shows secrets.
+With Ollama the URL, model name and timeout can also be changed live in the sidebar (*Загварын тохиргоо*).
+The default Ollama setup needs no API key. No key is hard-coded, and the UI never shows secrets.
+`.env` is read when the app starts; restart Streamlit after editing it. A variable that is already set (non-empty)
+in your shell wins over `.env`. `.env` is ignored by Git — never commit it.
+
+### Using Google Gemini (optional)
+Uses the official [`google-genai`](https://pypi.org/project/google-genai/) SDK (`models.generate_content`).
+
+1. Create an API key in [Google AI Studio](https://aistudio.google.com/) and put it in your local `.env`
+   (never paste it into the app, chat or an issue):
+   ```
+   FRAME_LLM_PROVIDER=gemini
+   GEMINI_API_KEY=<your key>
+   GEMINI_MODEL=<model name>
+   ```
+2. Pick `GEMINI_MODEL` from [Google's model list](https://ai.google.dev/gemini-api/docs/models) and check free-tier
+   access on the [pricing page](https://ai.google.dev/gemini-api/docs/pricing). FRAME does not hard-code a model.
+3. `pip install -r requirements.txt`, then `streamlit run app.py`. The sidebar shows whether the configuration is
+   *incomplete* (missing key/model) or the key and model are *confirmed* by the API.
+
+Things to know:
+* **Privacy:** on the free tier Google may use submitted content to improve its products. Do not send confidential
+  scripts. The app shows a reminder when Gemini is active.
+* **Quota:** free-tier rate limits are not published as fixed numbers; see your limits in AI Studio. One chat turn can
+  make several requests (up to 4 tools, plus repairs). A `429` is reported as a rate-limit error — wait and retry.
+* **Temperature:** Google recommends the default temperature for Gemini 3 models (lower values can cause looping), so
+  FRAME sends none unless you set `GEMINI_TEMPERATURE`; per-call temperatures from the agent are ignored for Gemini.
+* **Status check:** the sidebar check calls `models.get` (no generation). It confirms the key and model exist; it cannot
+  prove you have free-tier quota for generation.
+* The key is read from the environment on every request and is never stored in the config, the provider object, or
+  Streamlit session state, and error messages are scrubbed of it.
 
 ### Choosing a model
 `qwen2.5:3b` is the default because it runs on a CPU-only laptop. **Its Mongolian is limited** and small models
@@ -144,17 +177,18 @@ app.py            Streamlit UI (sidebar, chat, 5 result tabs)
 agent.py          orchestrator: routing, verification, bounded execution, explanations
 tools.py          the tools, deterministic rules, tool registry
 schemas.py        Pydantic models (Project, Character, Scene, Shot, ProductionPlan, ValidationIssue, ToolResult, …)
-llm_provider.py   provider interface, Ollama adapter, JSON extraction + one-shot repair
+llm_provider.py   provider interface, Ollama + Gemini adapters, JSON extraction + one-shot repair
 prompts.py        all model prompts
 export_utils.py   Markdown export
 sample_project.py "The Last Bus" sample data (labelled as sample)
-tests/            pytest suite (scripted LLM stub, no network)
+tests/            pytest suite (scripted LLM stub and fake Gemini client; hermetic, no network)
 ```
 
 ### Adding a provider
 Subclass `LLMProvider` (`check_status()` and `chat(messages, json_mode, temperature)`), raise the typed `LLMError`
 subclasses on failure, register the class in `llm_provider.PROVIDERS`, and set `FRAME_LLM_PROVIDER`. Read any API key
-from an environment variable — never from code or the UI. Only the Ollama adapter ships and has been written for this MVP.
+from an environment variable — never from code or the UI. Ollama and Gemini ship today; `GeminiProvider` is a good template
+(it also shows how to inject a fake client for offline tests).
 
 ---
 
@@ -164,6 +198,10 @@ from an environment variable — never from code or the UI. Only the Ollama adap
 |---|---|
 | Sidebar says *боломжгүй* / “Ollama руу холбогдож чадсангүй” | Install Ollama, run `ollama serve` (or start the desktop app), check `OLLAMA_BASE_URL`, click *Холболтыг дахин шалгах*. |
 | “загвар суугаагүй” / “олдсонгүй” | `ollama pull qwen2.5:3b` or set `FRAME_MODEL` to an installed model (`ollama list`). |
+| Gemini: “GEMINI_API_KEY тохируулагдаагүй” / “Тохиргоо дутуу” | Set `GEMINI_API_KEY` and `GEMINI_MODEL` in `.env` (or the shell), then restart Streamlit. |
+| Gemini: “түлхүүр буруу эсвэл эрхгүй” (401/403) | Check the key; the project may not be eligible for the free tier. |
+| Gemini: “загвар олдсонгүй” (404) | `GEMINI_MODEL` is wrong, retired, or not available to your account — pick one from the models page. |
+| Gemini: “хязгаар/квот хэтэрлээ” (429) | Free-tier limit reached. Wait, or reduce requests per turn; check limits in AI Studio. |
 | Timeout | CPU generation is slow. Raise `FRAME_TIMEOUT_SECONDS`, use a smaller model, or shorten the film duration (fewer scenes). |
 | “Загварын гаргасан JSON буруу” | Small models sometimes break JSON. Click the button again, add a clearer premise, or use a larger model. Nothing is saved when output is invalid. |
 | Mongolian text is poor | Use a larger/multilingual model, or switch *Үр дүнгийн хэл* to English. |
@@ -174,6 +212,8 @@ from an environment variable — never from code or the UI. Only the Ollama adap
 ---
 
 ## Known limitations
+* The Gemini adapter was verified against a fake client and the real SDK's request validation (loopback only); it has
+  **not** been run against the live Gemini API in the development environment, so check it with your own key.
 * The pipeline was verified with the scripted test LLM and the Streamlit headless test runner; **no real Ollama model
   was available in the development environment**, so output quality and speed with `qwen2.5:3b` (especially in
   Mongolian) are untested and should be checked on your machine.

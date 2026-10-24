@@ -256,7 +256,10 @@ def general_answer_messages(*, project_summary: str, history: list[dict], user_m
     )
     messages = [{"role": "system", "content": system}]
     for turn in history[-6:]:
-        if turn.get("role") in ("user", "assistant") and turn.get("content"):
-            messages.append({"role": turn["role"], "content": turn["content"][:1500]})
+        if turn.get("role") not in ("user", "assistant") or not turn.get("content"):
+            continue
+        if turn["role"] == "assistant" and len(messages) == 1:
+            continue  # a conversation must open with a user turn (e.g. skip the app's greeting note)
+        messages.append({"role": turn["role"], "content": turn["content"][:1500]})
     messages.append({"role": "user", "content": user_message})
     return messages

@@ -9,6 +9,7 @@ agent turn (`sync_widgets` flag -> `push_widgets`).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
@@ -128,12 +129,13 @@ def recheck_model() -> None:
 
 
 def apply_model_settings() -> None:
+    """Apply the Ollama settings widgets (only shown when the Ollama provider is active)."""
     ss = st.session_state
-    base = LLMConfig.from_env()
-    ss.llm_config = LLMConfig(
-        provider=base.provider, base_url=ss.w_base_url.strip().rstrip("/") or base.base_url,
-        model=ss.w_model.strip() or base.model, timeout_seconds=float(ss.w_timeout),
-        temperature=base.temperature, num_ctx=base.num_ctx)
+    ss.llm_config = replace(
+        ss.llm_config,
+        base_url=ss.w_base_url.strip().rstrip("/") or ss.llm_config.base_url,
+        model=ss.w_model.strip() or ss.llm_config.model,
+        timeout_seconds=float(ss.w_timeout))
     recheck_model()
 
 
@@ -216,16 +218,24 @@ def render_sidebar(p: Project) -> None:
         cfg = ss.llm_config
         chip = "ok" if status.available else "bad"
         st.markdown(f'<span class="frame-chip {chip}">{"бэлэн" if status.available else "боломжгүй"}</span>'
-                    f'<span class="frame-chip">{cfg.provider} · {cfg.model}</span>', unsafe_allow_html=True)
+                    f'<span class="frame-chip">{cfg.provider} · {ss.provider.model or "—"}</span>', unsafe_allow_html=True)
         if not status.available:
             st.warning(f"{status.message}\n\n**Demo горим:** зөвхөн дүрэмд суурилсан tool-ууд "
                        "(шалгалт, төлөвлөгөө, экспорт) ажиллана.")
         with st.expander("Загварын тохиргоо"):
-            st.text_input("Ollama URL", value=cfg.base_url, key="w_base_url")
-            st.text_input("Загварын нэр", value=cfg.model, key="w_model")
-            st.number_input("Timeout (сек)", min_value=10, max_value=1800, value=int(cfg.timeout_seconds),
-                            key="w_timeout")
-            st.button("Хэрэглэх & дахин шалгах", on_click=apply_model_settings)
+            if cfg.provider == "ollama":
+                st.text_input("Ollama URL", value=cfg.base_url, key="w_base_url")
+                st.text_input("Загварын нэр", value=cfg.model, key="w_model")
+                st.number_input("Timeout (сек)", min_value=10, max_value=1800, value=int(cfg.timeout_seconds),
+                                key="w_timeout")
+                st.button("Хэрэглэх & дахин шалгах", on_click=apply_model_settings)
+            else:
+                st.caption(f"Провайдер: **{cfg.provider}**. Загвар, түлхүүрийг `.env` (GEMINI_MODEL, "
+                           "GEMINI_API_KEY)-ээс уншина; түлхүүр энд харагдахгүй. `.env`-г өөрчилвөл "
+                           "Streamlit-ийг дахин ачаална уу.")
+        if cfg.provider == "gemini":
+            st.caption("⚠️ Gemini free tier-д илгээсэн агуулга Google-ийн бүтээгдэхүүнийг сайжруулахад "
+                       "ашиглагдаж болно. Нууц агуулга бүү илгээгээрэй.")
         st.button("Холболтыг дахин шалгах", on_click=recheck_model)
 
         st.divider()

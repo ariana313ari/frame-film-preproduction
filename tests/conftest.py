@@ -3,11 +3,27 @@ substitutes canned output for a real model response."""
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
+import llm_provider
 from llm_provider import LLMProvider, ProviderStatus
 from sample_project import sample_brief, sample_full
+
+
+@pytest.fixture(autouse=True)
+def hermetic_environment(monkeypatch):
+    """Tests must never read the developer's real .env or shell settings (API keys, provider choice).
+
+    app.py calls `load_env_file()` on every run; without this, an AppTest could pick up a real
+    GEMINI_API_KEY from .env and make a real network request. Tests that need settings set them
+    explicitly with monkeypatch.
+    """
+    for name in list(os.environ):
+        if name.startswith(("FRAME_", "GEMINI_", "OLLAMA_", "GOOGLE_API")):
+            monkeypatch.delenv(name)
+    monkeypatch.setattr(llm_provider, "load_env_file", lambda *args, **kwargs: None)
 
 
 class ScriptedLLM(LLMProvider):
