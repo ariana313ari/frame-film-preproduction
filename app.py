@@ -17,11 +17,15 @@ import streamlit as st
 import ui_theme as ui
 from agent import NEXT_LABEL, FrameAgent, next_intent
 from export_utils import safe_filename
-from llm_provider import LLMConfig, create_provider, load_env_file
+from llm_provider import LLMConfig, apply_secrets, create_provider, load_env_file
 from sample_project import sample_brief, sample_full, sample_with_flaws
 from schemas import ArtifactStatus, BudgetLevel, Intent, Project, Severity, Stage
 
 load_env_file(Path(__file__).parent / ".env")
+try:  # Streamlit Cloud "Secrets" / local .streamlit/secrets.toml (names only; values never shown)
+    apply_secrets(st.secrets)
+except FileNotFoundError:  # no secrets configured: fine, the status panel explains what is missing
+    pass
 
 # Brand assets, resolved relative to this file so `streamlit run app.py` works from any directory.
 ASSETS = Path(__file__).parent / "assets"
@@ -211,9 +215,9 @@ def render_sidebar(p: Project) -> None:
                                 key="w_timeout")
                 st.button("Хэрэглэх & дахин шалгах", on_click=apply_model_settings)
             else:
-                st.caption(f"Провайдер: **{cfg.provider}**. Загвар, түлхүүрийг `.env` (GEMINI_MODEL, "
-                           "GEMINI_API_KEY)-ээс уншина; түлхүүр энд харагдахгүй. `.env`-г өөрчилвөл "
-                           "Streamlit-ийг дахин ачаална уу.")
+                st.caption(f"Провайдер: **{cfg.provider}**. Загвар, түлхүүрийг Streamlit Secrets эсвэл "
+                           "`.env` (GEMINI_MODEL, GEMINI_API_KEY)-ээс уншина; түлхүүр энд харагдахгүй. "
+                           "Тохиргоо өөрчилвөл апп-аа дахин ачаална уу.")
         if cfg.provider == "gemini":
             st.caption("⚠️ Gemini free tier-д илгээсэн агуулга Google-ийн бүтээгдэхүүнийг сайжруулахад "
                        "ашиглагдаж болно. Нууц агуулга бүү илгээгээрэй.")

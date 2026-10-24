@@ -23,8 +23,9 @@ python -m venv .venv
 # 2. install
 pip install -r requirements.txt
 
-# 3. install Ollama (https://ollama.com) and pull a model
-ollama pull qwen2.5:3b
+# 3. configure a provider: copy .env.example to .env and set GEMINI_API_KEY + GEMINI_MODEL
+#    (Gemini is the default). For local models instead: install Ollama, `ollama pull qwen2.5:3b`,
+#    and set FRAME_LLM_PROVIDER=ollama in .env.
 
 # 4. run
 streamlit run app.py
@@ -51,28 +52,29 @@ Copy `.env.example` to `.env` (optional). Everything also works with defaults.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `FRAME_LLM_PROVIDER` | `ollama` | `ollama` or `gemini`. No automatic fallback between them. |
+| `FRAME_LLM_PROVIDER` | `gemini` | `gemini` or `ollama`. Ollama is used only when selected explicitly. No automatic fallback. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `FRAME_MODEL` | `qwen2.5:3b` | model name |
 | `FRAME_TIMEOUT_SECONDS` | `300` | per-request timeout (CPU generation is slow) |
 | `FRAME_TEMPERATURE` | `0.4` | sampling temperature |
 | `FRAME_NUM_CTX` | `8192` | context window requested from Ollama |
-| `GEMINI_API_KEY` | – | Gemini only. Secret: put it in your local `.env` only. |
+| `GEMINI_API_KEY` | – | Gemini only. Secret: Streamlit Cloud Secrets or your local `.env` only. |
 | `GEMINI_MODEL` | – (`.env.example` suggests one) | Gemini only. Required; model names and free-tier access change. |
 | `GEMINI_TEMPERATURE` | unset | Gemini only, optional (see below). |
 
 With Ollama the URL, model name and timeout can also be changed live in the sidebar (*Загварын тохиргоо*).
-The default Ollama setup needs no API key. No key is hard-coded, and the UI never shows secrets.
+No key is hard-coded, and the UI never shows secrets. Settings come from (highest priority first) real environment
+variables, `.env`, then Streamlit secrets (`.streamlit/secrets.toml` locally, **Secrets** on Community Cloud); a
+non-empty value from an earlier source is never overwritten, and a blank value counts as "not set".
 `.env` is read when the app starts; restart Streamlit after editing it. A variable that is already set (non-empty)
 in your shell wins over `.env`. `.env` is ignored by Git — never commit it.
 
-### Using Google Gemini (optional)
+### Using Google Gemini (the default)
 Uses the official [`google-genai`](https://pypi.org/project/google-genai/) SDK (`models.generate_content`).
 
 1. Create an API key in [Google AI Studio](https://aistudio.google.com/) and put it in your local `.env`
    (never paste it into the app, chat or an issue):
    ```
-   FRAME_LLM_PROVIDER=gemini
    GEMINI_API_KEY=<your key>
    GEMINI_MODEL=<model name>
    ```
@@ -93,7 +95,23 @@ Things to know:
 * The key is read from the environment on every request and is never stored in the config, the provider object, or
   Streamlit session state, and error messages are scrubbed of it.
 
-### Choosing a model
+### Deploying to Streamlit Community Cloud
+Gemini is the default provider, so a deployed app needs only secrets, not a local server. In your app's
+**Settings > Secrets** paste (real values only there, never in Git; see `.streamlit/secrets.toml.example`):
+```toml
+GEMINI_API_KEY = "<your key>"
+GEMINI_MODEL = "<a model your key can use>"
+```
+Use top-level keys. FRAME copies only its own setting names from secrets into the environment and never displays them.
+If something is missing, the sidebar and banner say exactly what (e.g. *GEMINI_API_KEY тохируулагдаагүй*) and the
+rule-based tools keep working in Demo mode. The cloud app never contacts a local Ollama server unless you set
+`FRAME_LLM_PROVIDER = "ollama"` **and** an `OLLAMA_BASE_URL` the cloud app can reach (on Cloud, `localhost` is not
+your computer).
+
+### Using Ollama (optional, local)
+Install Ollama, `ollama pull qwen2.5:3b`, and set `FRAME_LLM_PROVIDER=ollama` in your `.env`.
+
+### Choosing a model (Ollama)
 `qwen2.5:3b` is the default because it runs on a CPU-only laptop. **Its Mongolian is limited** and small models
 sometimes produce invalid JSON. FRAME retries once with the validation error and then shows an honest error — it
 never fabricates structured data. If your hardware allows, try a larger model (`qwen2.5:7b`, `llama3.1:8b`, …)
@@ -198,7 +216,8 @@ from an environment variable — never from code or the UI. Ollama and Gemini sh
 |---|---|
 | Sidebar says *боломжгүй* / “Ollama руу холбогдож чадсангүй” | Install Ollama, run `ollama serve` (or start the desktop app), check `OLLAMA_BASE_URL`, click *Холболтыг дахин шалгах*. |
 | “загвар суугаагүй” / “олдсонгүй” | `ollama pull qwen2.5:3b` or set `FRAME_MODEL` to an installed model (`ollama list`). |
-| Gemini: “GEMINI_API_KEY тохируулагдаагүй” / “Тохиргоо дутуу” | Set `GEMINI_API_KEY` and `GEMINI_MODEL` in `.env` (or the shell), then restart Streamlit. |
+| Gemini: “GEMINI_API_KEY тохируулагдаагүй” / “Тохиргоо дутуу” | Set `GEMINI_API_KEY` and `GEMINI_MODEL`: in **Secrets** on Streamlit Cloud, or in `.env` / the shell locally. Then reboot/restart the app. |
+| Deployed app shows “ollama” or tries `localhost:11434` | An old deployment: update to the version where Gemini is the default, and make sure `FRAME_LLM_PROVIDER` is not set to `ollama` in Secrets. |
 | Gemini: “түлхүүр буруу эсвэл эрхгүй” (401/403) | Check the key; the project may not be eligible for the free tier. |
 | Gemini: “загвар олдсонгүй” (404) | `GEMINI_MODEL` is wrong, retired, or not available to your account — pick one from the models page. |
 | Gemini: “хязгаар/квот хэтэрлээ” (429) | Free-tier limit reached. Wait, or reduce requests per turn; check limits in AI Studio. |

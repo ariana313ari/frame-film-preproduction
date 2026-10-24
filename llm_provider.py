@@ -1,8 +1,9 @@
 """LLM provider adapter.
 
-`LLMProvider` is the only thing the agent and tools know about. Ollama is the
-default implementation and Google Gemini the second one (`FRAME_LLM_PROVIDER=gemini`);
-another API can be supported by subclassing `LLMProvider` and registering it in
+`LLMProvider` is the only thing the agent and tools know about. Google Gemini is the
+default provider; local Ollama is optional and used ONLY when it is explicitly selected
+(`FRAME_LLM_PROVIDER=ollama`), so a hosted deployment never probes a local Ollama server.
+Another API can be supported by subclassing `LLMProvider` and registering it in
 `PROVIDERS` (see README, "Adding a provider"). The active provider is never changed
 silently: a configuration or API failure is raised, not worked around.
 
@@ -89,9 +90,36 @@ def load_env_file(path: str | Path = ".env") -> None:
             os.environ[key] = value
 
 
+# Settings that may be supplied through Streamlit secrets (Community Cloud "Secrets" or a local
+# .streamlit/secrets.toml). Only these names are ever copied into the environment.
+SECRET_KEYS = (
+    "FRAME_LLM_PROVIDER", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_TEMPERATURE",
+    "OLLAMA_BASE_URL", "FRAME_MODEL", "FRAME_TIMEOUT_SECONDS", "FRAME_TEMPERATURE", "FRAME_NUM_CTX",
+)
+
+
+def apply_secrets(secrets: Mapping[str, object]) -> list[str]:
+    """Copy allowlisted top-level secrets into `os.environ` and return the NAMES that were set.
+
+    Like `load_env_file`, a non-empty variable that is already set wins, so a real environment
+    variable can always override a secret. Only plain strings are used (nested tables are
+    ignored) and values are never returned or logged. Raises nothing if secrets are unavailable.
+    """
+    applied: list[str] = []
+    for name in SECRET_KEYS:
+        try:
+            value = secrets.get(name)
+        except (FileNotFoundError, KeyError):  # Streamlit raises FileNotFoundError when no secrets exist
+            return applied
+        if isinstance(value, str) and value.strip() and not os.environ.get(name):
+            os.environ[name] = value.strip()
+            applied.append(name)
+    return applied
+
+
 @dataclass(frozen=True)
 class LLMConfig:
-    provider: str = "ollama"
+    provider: str = "gemini"  # Ollama only when FRAME_LLM_PROVIDER=ollama is set explicitly
     base_url: str = "http://localhost:11434"
     model: str = "qwen2.5:3b"
     timeout_seconds: float = 300.0  # CPU-only inference can be slow
@@ -113,10 +141,13 @@ class LLMConfig:
             except ValueError:
                 return fallback
 
+        def text(key: str, fallback: str) -> str:  # a blank value counts as "not set"
+            return (env.get(key) or "").strip() or fallback
+
         return cls(
-            provider=env.get("FRAME_LLM_PROVIDER", default.provider).strip().lower(),
-            base_url=env.get("OLLAMA_BASE_URL", default.base_url).strip().rstrip("/"),
-            model=env.get("FRAME_MODEL", default.model).strip(),
+            provider=text("FRAME_LLM_PROVIDER", default.provider).lower(),
+            base_url=text("OLLAMA_BASE_URL", default.base_url).rstrip("/"),
+            model=text("FRAME_MODEL", default.model),
             timeout_seconds=number("FRAME_TIMEOUT_SECONDS", default.timeout_seconds, float),
             temperature=number("FRAME_TEMPERATURE", default.temperature, float),
             num_ctx=number("FRAME_NUM_CTX", default.num_ctx, int),
@@ -313,11 +344,11 @@ class GeminiProvider(LLMProvider):
     def _config_error(self) -> LLMError | None:
         if not self._api_key():
             return LLMAuthError(
-                f"{GEMINI_KEY_ENV} тохируулагдаагүй байна. `.env` файлд эсвэл орчны хувьсагчид "
-                "тохируулна уу (түлхүүрийг код эсвэл UI-д бүү оруулаарай).")
+                f"{GEMINI_KEY_ENV} тохируулагдаагүй байна. Streamlit Cloud дээр Secrets-д, локал дээр `.env` "
+                "файлд эсвэл орчны хувьсагчид тохируулна уу (түлхүүрийг код эсвэл UI-д бүү оруулаарай).")
         if not self.model:
             return LLMModelNotFoundError(
-                "GEMINI_MODEL тохируулагдаагүй байна. `.env`-д Gemini загварын нэрийг зааж өгнө үү "
+                "GEMINI_MODEL тохируулагдаагүй байна. Streamlit Secrets эсвэл `.env`-д Gemini загварын нэрийг зааж өгнө үү "
                 "(боломжит загваруудыг https://ai.google.dev/gemini-api/docs/models хаягаас үзнэ үү).")
         return None
 

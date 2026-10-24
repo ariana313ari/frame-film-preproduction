@@ -16,14 +16,16 @@ from sample_project import sample_brief, sample_full
 def hermetic_environment(monkeypatch):
     """Tests must never read the developer's real .env or shell settings (API keys, provider choice).
 
-    app.py calls `load_env_file()` on every run; without this, an AppTest could pick up a real
-    GEMINI_API_KEY from .env and make a real network request. Tests that need settings set them
+    app.py calls `load_env_file()` and `apply_secrets()` on every run; without this, an AppTest could
+    pick up a real GEMINI_API_KEY from .env or Streamlit secrets and make a real network request. Tests that need settings set them
     explicitly with monkeypatch.
     """
     for name in list(os.environ):
         if name.startswith(("FRAME_", "GEMINI_", "OLLAMA_", "GOOGLE_API")):
             monkeypatch.delenv(name)
     monkeypatch.setattr(llm_provider, "load_env_file", lambda *args, **kwargs: None)
+    # Same for Streamlit secrets (a real ~/.streamlit/secrets.toml must never leak into tests).
+    monkeypatch.setattr(llm_provider, "apply_secrets", lambda *args, **kwargs: [])
 
 
 class ScriptedLLM(LLMProvider):

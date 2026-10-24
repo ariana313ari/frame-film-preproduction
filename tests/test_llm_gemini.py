@@ -97,7 +97,7 @@ def test_provider_selection_from_env():
     assert isinstance(gem, GeminiProvider) and gem.model == MODEL
     oll = create_provider(LLMConfig.from_env({"FRAME_LLM_PROVIDER": "ollama", "FRAME_MODEL": "qwen2.5:3b"}))
     assert isinstance(oll, OllamaProvider) and oll.model == "qwen2.5:3b"
-    assert isinstance(create_provider(LLMConfig.from_env({})), OllamaProvider)   # default unchanged
+    assert isinstance(create_provider(LLMConfig.from_env({})), GeminiProvider)   # Gemini is the default
     assert {"ollama", "gemini"} <= set(llm_provider.PROVIDERS)
 
 
